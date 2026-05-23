@@ -1,0 +1,295 @@
+name: Build articOs ISO
+
+on:
+  push:
+    branches: [main, develop]
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag (leave blank for dev build)'
+        required: false
+      profile:
+        description: 'Build profile variant'
+        required: false
+        default: 'standard'
+
+env:
+  ISO_NAME: articOs
+  BUILD_DIR: /tmp/articOs-build
+
+concurrency:
+  group: ${{ github.ref }}-build
+  cancel-in-progress: true
+
+jobs:
+  ## ── Validate & Lint ────────────────────────────────────────────────────────
+  validate:
+    name: Validate configs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shellcheck all scripts
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: './artic-profiles'
+          severity: warning
+
+      - name: Shellcheck system tools
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: './artic-snapshot'
+          severity: warning
+
+      - name: Shellcheck container tools
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: './artic-container'
+          severity: warning
+
+      - name: Validate package lists (no empty lines at EOF)
+        run: |
+          python3 - << 'PY'
+          import sys, re
+          with open('profile/packages.x86_64') as f:
+              pkgs = [l.strip() for l in f if l.strip() and not l.startswith('#')]
+          dupes = [p for p in pkgs if pkgs.count(p) > 1]
+          if dupes:
+              print(f"Duplicate packages: {set(dupes)}", file=sys.stderr)
+              sys.exit(1)
+          print(f"Package list OK: {len(pkgs)} packages")
+          PY
+
+      - name: Validate profile configs
+        run: |
+          for conf in artic-profiles/profiles/*.conf; do
+            echo "Checking $conf..."
+            bash -n "$conf" || exit 1
+            grep -q '^DESCRIPTION=' "$conf" || { echo "Missing DESCRIPTION in $conf"; exit 1; }
+            grep -q '^ICON=' "$conf" || { echo "Missing ICON in $conf"; exit 1; }
+          done
+          echo "All profiles valid"
+
+  ## ── Build ISO ──────────────────────────────────────────────────────────────
+  build:
+    name: Build ISO (${{ matrix.variant }})
+    needs: validate
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+      options: --privileged
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - standard
+          # - nvidia   # uncomment to build Nvidia variant
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set build metadata
+        id: meta
+        run: |
+          VERSION=$(date +%Y.%m.%d)
+          # Use the SHA provided by GitHub Actions — no git binary required
+          COMMIT="${{ github.sha }}"
+          COMMIT="${COMMIT:0:7}"
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            TAG="${{ github.ref_name }}"
+            ISO_FILENAME="${ISO_NAME}-${TAG}-x86_64.iso"
+          else
+            ISO_FILENAME="${ISO_NAME}-${VERSION}-${COMMIT}-x86_64.iso"
+          fi
+          echo "version=${VERSION}"           >> "$GITHUB_OUTPUT"
+          echo "commit=${COMMIT}"             >> "$GITHUB_OUTPUT"
+          echo "iso_filename=${ISO_FILENAME}" >> "$GITHUB_OUTPUT"
+          echo "ISO: $ISO_FILENAME"
+
+      - name: Initialize pacman keyring & install build deps
+        run: |
+          pacman-key --init
+          pacman-key --populate archlinux
+          pacman -Sy --noconfirm --needed \
+            archiso \
+            mkinitcpio \
+            mkinitcpio-archiso \
+            squashfs-tools \
+            libisoburn \
+            edk2-ovmf \
+            grub \
+            syslinux \
+            git \
+            curl \
+            python
+
+      - name: Prepare build directory
+        run: |
+          mkdir -p "$BUILD_DIR"
+          cp -r profile/* "$BUILD_DIR/"
+          # Install artic tools into airootfs
+          mkdir -p "$BUILD_DIR/airootfs/usr/local/bin"
+          mkdir -p "$BUILD_DIR/airootfs/etc/artic/profiles"
+          mkdir -p "$BUILD_DIR/airootfs/etc/artic/hooks"
+          install -m755 artic-profiles/artic-profile \
+            "$BUILD_DIR/airootfs/usr/local/bin/artic-profile"
+          install -m755 artic-snapshot/artic-snapshot \
+            "$BUILD_DIR/airootfs/usr/local/bin/artic-snapshot"
+          install -m755 artic-container/artic-box \
+            "$BUILD_DIR/airootfs/usr/local/bin/artic-box"
+          install -m755 profile/airootfs/usr/local/bin/artic-secure \
+            "$BUILD_DIR/airootfs/usr/local/bin/artic-secure"
+          cp artic-profiles/profiles/*.conf \
+            "$BUILD_DIR/airootfs/etc/artic/profiles/"
+
+      - name: Apply Nvidia variant overrides
+        if: matrix.variant == 'nvidia'
+        run: |
+          # Uncomment nvidia packages
+          sed -i 's/#nvidia-open/nvidia-open/g' "$BUILD_DIR/packages.x86_64"
+          sed -i 's/#nvidia-utils/nvidia-utils/g' "$BUILD_DIR/packages.x86_64"
+
+      - name: Build ISO
+        run: |
+          cd "$BUILD_DIR"
+          mkarchiso -v -w /tmp/archiso-work -o /tmp/iso-out .
+          ls -lh /tmp/iso-out/*.iso
+
+      - name: Rename ISO
+        run: |
+          mv /tmp/iso-out/*.iso \
+             "/tmp/iso-out/${{ steps.meta.outputs.iso_filename }}"
+
+      - name: Generate checksums
+        run: |
+          cd /tmp/iso-out
+          sha256sum "${{ steps.meta.outputs.iso_filename }}" > \
+            "${{ steps.meta.outputs.iso_filename }}.sha256"
+          b2sum "${{ steps.meta.outputs.iso_filename }}" > \
+            "${{ steps.meta.outputs.iso_filename }}.b2"
+          cat "${{ steps.meta.outputs.iso_filename }}.sha256"
+
+      - name: GPG sign ISO (release builds only)
+        if: github.ref_type == 'tag' && env.GPG_PRIVATE_KEY != ''
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --import
+          cd /tmp/iso-out
+          echo "$GPG_PASSPHRASE" | gpg --batch --yes --passphrase-fd 0 \
+            --detach-sign --armor \
+            "${{ steps.meta.outputs.iso_filename }}"
+
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: articOs-${{ matrix.variant }}-${{ steps.meta.outputs.commit }}
+          path: |
+            /tmp/iso-out/*.iso
+            /tmp/iso-out/*.sha256
+            /tmp/iso-out/*.b2
+            /tmp/iso-out/*.asc
+          retention-days: 14
+
+  ## ── QEMU smoke test ────────────────────────────────────────────────────────
+  test:
+    name: QEMU smoke test
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download ISO artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: articOs-standard-*
+          merge-multiple: true
+          path: /tmp/iso-artifacts
+
+      - name: Install QEMU
+        run: sudo apt-get install -y qemu-system-x86 ovmf
+
+      - name: Boot ISO and verify (30s smoke test)
+        timeout-minutes: 5
+        run: |
+          ISO=$(ls /tmp/iso-artifacts/*.iso | head -1)
+          echo "Testing: $ISO"
+          timeout 30 qemu-system-x86_64 \
+            -m 2G \
+            -cdrom "$ISO" \
+            -nographic \
+            -no-reboot \
+            -serial mon:stdio \
+            -bios /usr/share/ovmf/OVMF.fd \
+            2>&1 | tee /tmp/qemu.log || true
+          # Check for panic
+          grep -q "Kernel panic" /tmp/qemu.log && exit 1 || true
+          echo "Smoke test passed (no kernel panic in 30s)"
+
+  ## ── Release ────────────────────────────────────────────────────────────────
+  release:
+    name: Create GitHub Release
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    if: github.ref_type == 'tag'
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/release-artifacts
+          merge-multiple: true
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          TAG="${{ github.ref_name }}"
+          # Safely get previous tag — git may not have full history on shallow clones
+          PREV_TAG=$(git tag --sort=-creatordate | grep -v "^${TAG}$" | head -1 || echo "")
+          {
+            echo "## articOs ${TAG}"
+            echo ""
+            echo "### What's included"
+            echo "- **Kernel**: linux-zen (low-latency, performance-optimised)"
+            echo "- **Profiles**: dev, hacker, gamer, home, robotics, creative, minimal"
+            echo "- **Security**: AppArmor, firejail, UFW, fail2ban, kernel hardening"
+            echo "- **Snapshots**: btrfs/snapper + timeshift (auto before pacman ops)"
+            echo "- **Containers**: artic-box (distrobox + flatpak + nix envs)"
+            echo ""
+            if [[ -n "$PREV_TAG" ]]; then
+              echo "### Commits since ${PREV_TAG}"
+              git log --oneline "${PREV_TAG}..${TAG}" 2>/dev/null || echo "_Could not enumerate commits_"
+            fi
+            echo ""
+            echo "### Verify download"
+            echo "\`\`\`"
+            echo "sha256sum -c articOs-${TAG}-x86_64.iso.sha256"
+            echo "\`\`\`"
+          } > /tmp/release_notes.md
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: articOs ${{ github.ref_name }}
+          body_path: /tmp/release_notes.md
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'beta') }}
+          files: |
+            /tmp/release-artifacts/*.iso
+            /tmp/release-artifacts/*.sha256
+            /tmp/release-artifacts/*.b2
+            /tmp/release-artifacts/*.asc
