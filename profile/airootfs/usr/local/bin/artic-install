@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │  artic-install  —  articOs Post-Install Configuration Wizard            │
+# │  Runs after first boot. Lets user pick profile, set up snapshot,        │
+# │  enable flatpak, configure security level, and install extras.          │
+# └─────────────────────────────────────────────────────────────────────────┘
+set -euo pipefail
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
+info() { echo -e "${CYAN}${BOLD}►${RESET} $*"; }
+ok()   { echo -e "${GREEN}✓${RESET} $*"; }
+warn() { echo -e "${YELLOW}⚠${RESET} $*"; }
+hr()   { echo -e "${CYAN}────────────────────────────────────────${RESET}"; }
+
+clear
+cat << 'BANNER'
+
+  ╔══════════════════════════════════════════════════╗
+  ║        articOs — First Boot Setup                ║
+  ║  Minimal base installed. Now shape it your way.  ║
+  ╚══════════════════════════════════════════════════╝
+
+BANNER
+hr
+
+echo "This wizard will:"
+echo "  1. Choose a user profile (installs targeted apps)"
+echo "  2. Set up automatic snapshots"
+echo "  3. Configure security level"
+echo "  4. Enable container support (artic-box)"
+echo "  5. Set up Flatpak + Flathub"
+echo ""
+read -rp "Continue? [Y/n] " go
+[[ "${go,,}" != "n" ]] || exit 0
+
+## ── Step 1: Profile ──────────────────────────────────────────────────────────
+hr
+info "Step 1/5 — Choose your Profile"
+echo ""
+echo "Profiles install curated apps and tune your environment:"
+echo ""
+echo "  1) dev       — compilers, IDEs, Docker, LSPs"
+echo "  2) hacker    — pentesting, CTF, Wireshark, Metasploit"
+echo "  3) gamer     — Steam, Lutris, Wine, GameMode"
+echo "  4) home      — browser, office, media, messaging"
+echo "  5) robotics  — ROS2, Arduino, Gazebo, FPGA"
+echo "  6) creative  — GIMP, Blender, Kdenlive, DAW"
+echo "  7) minimal   — bare essentials only"
+echo "  8) skip      — I'll run artic-profile manually later"
+echo ""
+read -rp "Enter number [8]: " prof_choice
+prof_choice="${prof_choice:-8}"
+
+case "$prof_choice" in
+    1) PROFILE=dev ;;
+    2) PROFILE=hacker ;;
+    3) PROFILE=gamer ;;
+    4) PROFILE=home ;;
+    5) PROFILE=robotics ;;
+    6) PROFILE=creative ;;
+    7) PROFILE=minimal ;;
+    *) PROFILE="" ;;
+esac
+
+## ── Step 2: Snapshots ────────────────────────────────────────────────────────
+hr
+info "Step 2/5 — Automatic Snapshots"
+echo ""
+echo "articOs can automatically snapshot before:"
+echo "  • Every pacman/paru upgrade (snap-pac)"
+echo "  • Profile activations"
+echo "  • On a daily schedule"
+echo ""
+read -rp "Enable automatic snapshots? [Y/n] " snap_choice
+ENABLE_SNAPS=true
+[[ "${snap_choice,,}" == "n" ]] && ENABLE_SNAPS=false
+
+## ── Step 3: Security ─────────────────────────────────────────────────────────
+hr
+info "Step 3/5 — Security Level"
+echo ""
+echo "  1) standard  — UFW firewall + AppArmor (recommended)"
+echo "  2) hardened  — + kernel hardening, fail2ban, Firejail sandboxing"
+echo "  3) paranoid  — + SSH key-only, strict sysctl, audit logging"
+echo "  4) skip      — configure security manually later"
+echo ""
+read -rp "Security level [1]: " sec_choice
+sec_choice="${sec_choice:-1}"
+
+## ── Step 4: Containers ───────────────────────────────────────────────────────
+hr
+info "Step 4/5 — Container Support (artic-box)"
+echo ""
+echo "artic-box provides:"
+echo "  • Run Ubuntu/Fedora/Debian/Kali alongside Arch (distrobox)"
+echo "  • Isolated Python/Node/Rust/Nix dev environments"
+echo "  • Install apt/dnf packages without affecting the host"
+echo ""
+read -rp "Enable container support? [Y/n] " box_choice
+ENABLE_BOX=true
+[[ "${box_choice,,}" == "n" ]] && ENABLE_BOX=false
+
+## ── Step 5: Flatpak ──────────────────────────────────────────────────────────
+hr
+info "Step 5/5 — Flatpak & Flathub"
+echo ""
+read -rp "Add Flathub and enable Flatpak sandboxed apps? [Y/n] " flat_choice
+ENABLE_FLATPAK=true
+[[ "${flat_choice,,}" == "n" ]] && ENABLE_FLATPAK=false
+
+## ── Summary ──────────────────────────────────────────────────────────────────
+hr
+echo -e "${BOLD}Summary of changes:${RESET}"
+echo "  Profile:    ${PROFILE:-none (skip)}"
+echo "  Snapshots:  $ENABLE_SNAPS"
+echo "  Security:   level $sec_choice"
+echo "  artic-box:  $ENABLE_BOX"
+echo "  Flatpak:    $ENABLE_FLATPAK"
+echo ""
+read -rp "Apply? [Y/n] " confirm
+[[ "${confirm,,}" != "n" ]] || { info "Aborted."; exit 0; }
+hr
+
+## ── Apply ────────────────────────────────────────────────────────────────────
+
+## Snapshots
+if [[ "$ENABLE_SNAPS" == true ]]; then
+    info "Setting up snapshots..."
+    sudo artic-snapshot setup
+    ok "Snapshots configured"
+fi
+
+## Security
+case "$sec_choice" in
+    1) sudo artic-secure firewall; sudo artic-secure apparmor ;;
+    2) sudo artic-secure harden ;;
+    3) sudo artic-secure harden; sudo artic-secure ssh ;;
+esac
+
+## Containers
+if [[ "$ENABLE_BOX" == true ]]; then
+    info "Installing container support..."
+    sudo pacman -S --needed --noconfirm podman distrobox toolbox
+    ok "artic-box ready. Try: artic-box create ubuntu"
+fi
+
+## Flatpak
+if [[ "$ENABLE_FLATPAK" == true ]]; then
+    sudo pacman -S --needed --noconfirm flatpak
+    flatpak remote-add --if-not-exists flathub \
+        https://flathub.org/repo/flathub.flatpakrepo
+    ok "Flathub configured"
+fi
+
+## Profile (last — may take a while)
+if [[ -n "$PROFILE" ]]; then
+    info "Activating profile '${PROFILE}'..."
+    artic-profile "$PROFILE"
+fi
+
+hr
+ok "articOs first-boot setup complete!"
+echo ""
+echo "  ${CYAN}artic-profile${RESET}   — switch profiles anytime (or Super+P)"
+echo "  ${CYAN}artic-snapshot${RESET}  — manage snapshots"
+echo "  ${CYAN}artic-box${RESET}       — containers & isolated envs"
+echo "  ${CYAN}artic-secure${RESET}    — security audit & hardening"
+echo ""
+info "Log out and back in to apply all environment changes."

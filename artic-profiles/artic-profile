@@ -1,0 +1,351 @@
+#!/usr/bin/env bash
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │  artic-profile  —  articOs Profile Manager                              │
+# │  Select a profile via TUI or pass one as argument.                      │
+# │  Profiles install apps, configure environment, enable services.         │
+# │                                                                         │
+# │  Usage:  artic-profile [profile-name] [--list] [--info <name>]         │
+# │          artic-profile              # interactive TUI                   │
+# │          Super+P                    # launched via keybind (rofi mode)  │
+# └─────────────────────────────────────────────────────────────────────────┘
+set -euo pipefail
+
+## ── Constants ────────────────────────────────────────────────────────────────
+ARTIC_VERSION="1.0.0"
+PROFILES_DIR="/etc/artic/profiles"
+USER_PROFILES_DIR="${HOME}/.config/artic/profiles"
+STATE_FILE="/etc/artic/active_profile"
+LOG_FILE="/var/log/artic-profile.log"
+LOCK_FILE="/var/lock/artic-profile.lock"
+
+## ── Colors ───────────────────────────────────────────────────────────────────
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
+
+## ── Helpers ──────────────────────────────────────────────────────────────────
+log()  { echo "[$(date '+%H:%M:%S')] $*" | tee -a "$LOG_FILE"; }
+info() { echo -e "${CYAN}${BOLD}[artic]${RESET} $*"; }
+ok()   { echo -e "${GREEN}✓${RESET} $*"; }
+warn() { echo -e "${YELLOW}⚠${RESET} $*"; }
+err()  { echo -e "${RED}✗${RESET} $*" >&2; }
+die()  { err "$*"; exit 1; }
+
+banner() {
+    echo -e "${CYAN}"
+    cat << 'BANNER'
+    ╔═══════════════════════════════════════╗
+    ║   🔷  articOs  Profile  Manager  🔷   ║
+    ║   Adaptive Linux — Your Shape         ║
+    ╚═══════════════════════════════════════╝
+BANNER
+    echo -e "${RESET}"
+}
+
+## ── Lock Guard ───────────────────────────────────────────────────────────────
+acquire_lock() {
+    if [[ -f "$LOCK_FILE" ]]; then
+        local pid; pid=$(cat "$LOCK_FILE")
+        kill -0 "$pid" 2>/dev/null && die "Another artic-profile instance is running (PID $pid)"
+        rm -f "$LOCK_FILE"
+    fi
+    echo $$ > "$LOCK_FILE"
+    trap 'rm -f "$LOCK_FILE"' EXIT INT TERM
+}
+
+## ── Profile Discovery ────────────────────────────────────────────────────────
+list_profiles() {
+    local profiles=()
+    for dir in "$PROFILES_DIR" "$USER_PROFILES_DIR"; do
+        [[ -d "$dir" ]] || continue
+        while IFS= read -r f; do
+            local name; name=$(basename "$f" .conf)
+            profiles+=("$name")
+        done < <(find "$dir" -maxdepth 1 -name "*.conf" | sort)
+    done
+    # Deduplicate
+    printf '%s\n' "${profiles[@]}" | awk '!seen[$0]++'
+}
+
+load_profile() {
+    local name="$1"
+    local conf_file=""
+
+    # User profiles override system ones
+    for dir in "$USER_PROFILES_DIR" "$PROFILES_DIR"; do
+        local f="$dir/${name}.conf"
+        if [[ -f "$f" ]]; then conf_file="$f"; break; fi
+    done
+
+    [[ -n "$conf_file" ]] || die "Profile '${name}' not found"
+    echo "$conf_file"
+}
+
+## ── TUI Menu (dialog / fallback fzf / fallback plain) ───────────────────────
+pick_profile_tui() {
+    local profiles; mapfile -t profiles < <(list_profiles)
+    [[ ${#profiles[@]} -gt 0 ]] || die "No profiles found in $PROFILES_DIR"
+
+    # Build description list
+    local menu_items=()
+    for p in "${profiles[@]}"; do
+        local conf; conf=$(load_profile "$p")
+        local desc; desc=$(grep -m1 '^DESCRIPTION=' "$conf" 2>/dev/null | cut -d= -f2- | tr -d '"')
+        menu_items+=("$p" "${desc:-No description}")
+    done
+
+    if command -v dialog &>/dev/null; then
+        dialog --clear --title "articOs Profile Manager" \
+               --menu "Select a profile to activate:" 20 60 12 \
+               "${menu_items[@]}" \
+               2>&1 >/dev/tty
+    elif command -v fzf &>/dev/null; then
+        printf '%s\n' "${profiles[@]}" | fzf \
+            --prompt="Select profile > " \
+            --header="articOs Profile Manager — TAB for multi-select"
+    else
+        echo "Available profiles:"
+        local i=1
+        for p in "${profiles[@]}"; do echo "  $i) $p"; ((i++)); done
+        read -rp "Enter number: " idx
+        echo "${profiles[$((idx-1))]}"
+    fi
+}
+
+## ── Rofi Mode (Super+P keybind) ──────────────────────────────────────────────
+pick_profile_rofi() {
+    local profiles; mapfile -t profiles < <(list_profiles)
+    local active; active=$(cat "$STATE_FILE" 2>/dev/null || echo "none")
+
+    local items=""
+    for p in "${profiles[@]}"; do
+        local conf; conf=$(load_profile "$p")
+        local icon; icon=$(grep -m1 '^ICON=' "$conf" 2>/dev/null | cut -d= -f2- | tr -d '"')
+        local marker=""
+        [[ "$p" == "$active" ]] && marker=" ✓"
+        items+="${icon:-🔷} ${p}${marker}\n"
+    done
+
+    local chosen
+    chosen=$(echo -e "$items" | rofi -dmenu \
+        -i -p "🔷 articOs Profile" \
+        -theme-str 'window {width: 400px;}' \
+        -no-custom) || return 1
+
+    # Strip icon and marker
+    echo "$chosen" | awk '{print $2}' | tr -d '✓' | xargs
+}
+
+## ── Package Installation Engine ──────────────────────────────────────────────
+install_packages() {
+    local -a pkgs=("$@")
+    [[ ${#pkgs[@]} -eq 0 ]] && return 0
+
+    info "Installing ${#pkgs[@]} packages..."
+
+    # Separate AUR from official
+    local -a aur_pkgs=()
+    local -a official_pkgs=()
+
+    for pkg in "${pkgs[@]}"; do
+        if [[ "$pkg" == aur:* ]]; then
+            aur_pkgs+=("${pkg#aur:}")
+        else
+            official_pkgs+=("$pkg")
+        fi
+    done
+
+    if [[ ${#official_pkgs[@]} -gt 0 ]]; then
+        sudo pacman -S --needed --noconfirm "${official_pkgs[@]}" \
+            2>&1 | tee -a "$LOG_FILE" || warn "Some official packages failed"
+    fi
+
+    if [[ ${#aur_pkgs[@]} -gt 0 ]]; then
+        if command -v paru &>/dev/null; then
+            paru -S --needed --noconfirm "${aur_pkgs[@]}" \
+                2>&1 | tee -a "$LOG_FILE" || warn "Some AUR packages failed"
+        elif command -v yay &>/dev/null; then
+            yay -S --needed --noconfirm "${aur_pkgs[@]}" \
+                2>&1 | tee -a "$LOG_FILE" || warn "Some AUR packages failed (yay)"
+        else
+            warn "AUR helper not found; skipping: ${aur_pkgs[*]}"
+        fi
+    fi
+}
+
+install_flatpaks() {
+    local -a apps=("$@")
+    [[ ${#apps[@]} -eq 0 ]] && return 0
+    command -v flatpak &>/dev/null || { warn "flatpak not installed"; return; }
+    flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+    for app in "${apps[@]}"; do
+        flatpak install -y flathub "$app" 2>&1 | tee -a "$LOG_FILE" || warn "Flatpak $app failed"
+    done
+}
+
+install_apt_in_box() {
+    local -a pkgs=("$@")
+    [[ ${#pkgs[@]} -eq 0 ]] && return 0
+    command -v artic-box &>/dev/null || { warn "artic-box not found"; return; }
+    artic-box exec ubuntu -- sudo apt install -y "${pkgs[@]}" 2>&1 | tee -a "$LOG_FILE"
+}
+
+## ── Service Management ───────────────────────────────────────────────────────
+enable_services() {
+    for svc in "$@"; do
+        sudo systemctl enable --now "$svc" 2>&1 | tee -a "$LOG_FILE" \
+            && ok "Enabled service: $svc" \
+            || warn "Could not enable: $svc"
+    done
+}
+
+disable_services() {
+    for svc in "$@"; do
+        sudo systemctl disable --now "$svc" 2>/dev/null || true
+    done
+}
+
+## ── Environment Setup ────────────────────────────────────────────────────────
+apply_env() {
+    local -A env_vars=("$@")
+    local env_file="${HOME}/.config/artic/profile.env"
+    mkdir -p "$(dirname "$env_file")"
+    : > "$env_file"
+    for key in "${!env_vars[@]}"; do
+        echo "export ${key}=${env_vars[$key]}" >> "$env_file"
+    done
+    ok "Environment written to $env_file"
+    info "Add 'source ~/.config/artic/profile.env' to your .zshrc/.bashrc (done automatically if artic-omz is enabled)"
+}
+
+## ── Core Activate ────────────────────────────────────────────────────────────
+activate_profile() {
+    local name="$1"
+    local conf_file; conf_file=$(load_profile "$name")
+
+    acquire_lock
+    banner
+    info "Activating profile: ${BOLD}${name}${RESET}"
+    log "=== Activating profile: $name ==="
+
+    ## Source the profile safely (in subshell to catch errors)
+    (
+        ## Profile variables (defaults)
+        DESCRIPTION=""
+        ICON="🔷"
+        PACMAN_PACKAGES=()
+        AUR_PACKAGES=()
+        FLATPAK_APPS=()
+        APT_IN_BOX=()
+        SERVICES_ENABLE=()
+        SERVICES_DISABLE=()
+        SYSCTL_SETTINGS=()
+        ARTIC_ENV=()
+        POST_INSTALL_SCRIPT=""
+        SNAPSHOT_BEFORE_INSTALL=true
+
+        # shellcheck disable=SC1090
+        source "$conf_file"
+
+        ## ── Snapshot before changes (safety net) ──────────────────────────
+        if [[ "${SNAPSHOT_BEFORE_INSTALL:-true}" == true ]] && \
+           command -v artic-snapshot &>/dev/null; then
+            info "Creating pre-activation snapshot..."
+            artic-snapshot create "pre-profile-${name}" --quiet || warn "Snapshot failed (non-fatal)"
+        fi
+
+        ## ── Package installation ──────────────────────────────────────────
+        install_packages "${PACMAN_PACKAGES[@]+"${PACMAN_PACKAGES[@]}"}"
+
+        local aur_tagged=()
+        for p in "${AUR_PACKAGES[@]+"${AUR_PACKAGES[@]}"}"; do
+            aur_tagged+=("aur:$p")
+        done
+        install_packages "${aur_tagged[@]+"${aur_tagged[@]}"}"
+
+        install_flatpaks "${FLATPAK_APPS[@]+"${FLATPAK_APPS[@]}"}"
+        install_apt_in_box "${APT_IN_BOX[@]+"${APT_IN_BOX[@]}"}"
+
+        ## ── Services ──────────────────────────────────────────────────────
+        disable_services "${SERVICES_DISABLE[@]+"${SERVICES_DISABLE[@]}"}"
+        enable_services  "${SERVICES_ENABLE[@]+"${SERVICES_ENABLE[@]}"}"
+
+        ## ── Sysctl tweaks ─────────────────────────────────────────────────
+        if [[ ${#SYSCTL_SETTINGS[@]} -gt 0 ]]; then
+            local sctl_file="/etc/sysctl.d/80-artic-${name}.conf"
+            printf '%s\n' "${SYSCTL_SETTINGS[@]}" | sudo tee "$sctl_file" >/dev/null
+            sudo sysctl --system >/dev/null 2>&1 || true
+            ok "Applied sysctl tuning for $name"
+        fi
+
+        ## ── Post-install hook ─────────────────────────────────────────────
+        if [[ -n "${POST_INSTALL_SCRIPT}" && -x "${POST_INSTALL_SCRIPT}" ]]; then
+            info "Running post-install hook..."
+            bash "${POST_INSTALL_SCRIPT}" 2>&1 | tee -a "$LOG_FILE"
+        fi
+
+        ## ── Profile env ───────────────────────────────────────────────────
+        if [[ ${#ARTIC_ENV[@]} -gt 0 ]]; then
+            env_file="${HOME}/.config/artic/profile.env"
+            mkdir -p "$(dirname "$env_file")"
+            : > "$env_file"
+            printf '%s\n' "${ARTIC_ENV[@]}" >> "$env_file"
+            ok "Profile env written to $env_file"
+        fi
+    )
+
+    ## Record active profile
+    echo "$name" | sudo tee "$STATE_FILE" >/dev/null
+
+    ok "Profile '${name}' activated! Log: $LOG_FILE"
+    info "Some changes take effect after re-login or reboot."
+
+    # Desktop notification if running in X/Wayland
+    if [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
+        notify-send "articOs" "Profile '${name}' activated!" \
+            --icon=system-software-install 2>/dev/null || true
+    fi
+}
+
+## ── Info ─────────────────────────────────────────────────────────────────────
+show_info() {
+    local name="$1"
+    local conf_file; conf_file=$(load_profile "$name")
+    echo -e "${BOLD}Profile: ${CYAN}${name}${RESET}"
+    echo -e "${BOLD}File:${RESET} $conf_file"
+    echo "────────────────────────────────────────"
+    grep -E '^(DESCRIPTION|ICON|PACMAN_PACKAGES|AUR_PACKAGES|FLATPAK_APPS|SERVICES_ENABLE)' \
+        "$conf_file" | sed 's/^/  /'
+}
+
+## ── Status ───────────────────────────────────────────────────────────────────
+show_status() {
+    local active; active=$(cat "$STATE_FILE" 2>/dev/null || echo "none")
+    echo -e "${BOLD}Active profile:${RESET} ${CYAN}${active}${RESET}"
+    echo -e "${BOLD}Available profiles:${RESET}"
+    list_profiles | while read -r p; do
+        local marker="  "
+        [[ "$p" == "$active" ]] && marker="${GREEN}✓ ${RESET}"
+        echo -e "  ${marker}${p}"
+    done
+}
+
+## ── Main ─────────────────────────────────────────────────────────────────────
+main() {
+    case "${1:-}" in
+        --list|-l)      list_profiles ;;
+        --status|-s)    show_status ;;
+        --info|-i)      shift; show_info "${1:-}" ;;
+        --rofi)         chosen=$(pick_profile_rofi) && activate_profile "$chosen" ;;
+        --help|-h)
+            echo "Usage: artic-profile [profile] [--list] [--status] [--info <name>] [--rofi]"
+            ;;
+        "")
+            chosen=$(pick_profile_tui) && activate_profile "$chosen"
+            ;;
+        *)
+            activate_profile "$1"
+            ;;
+    esac
+}
+
+main "$@"

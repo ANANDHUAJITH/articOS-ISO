@@ -1,0 +1,15 @@
+
+   ██████╗  ██████╗████████╗██╗ ██████╗ ██████╗ ███████╗
+  ██╔═══██╗██╔════╝╚══██╔══╝██║██╔════╝██╔═══██╗██╔════╝
+  ███████║█████╗     ██║   ██║██║     ██║   ██║███████╗
+  ██╔══██║██╔══╝     ██║   ██║██║     ██║   ██║╚════██║
+  ██║  ██║╚██████╗   ██║   ██║╚██████╗╚██████╔╝███████║
+  ╚═╝  ╚═╝ ╚═════╝   ╚═╝   ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝
+  Adaptive Linux • Minimal base • Your shape, your rules
+  ─────────────────────────────────────────────────────────
+  artic-profile    Select a productivity profile (Super+P)
+  artic-snapshot   Manage system snapshots
+  artic-box        Container & isolated environments
+  artic-secure     Security hardening & audit
+  ─────────────────────────────────────────────────────────
+

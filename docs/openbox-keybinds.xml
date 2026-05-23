@@ -1,0 +1,30 @@
+<!-- articOs: Keybind additions for openbox rc.xml -->
+<!-- Add these inside <keyboard> section of ~/.config/openbox/rc.xml -->
+
+<!-- Super+P: Profile picker (rofi mode) -->
+<keybind key="W-p">
+  <action name="Execute">
+    <command>artic-profile --rofi</command>
+  </action>
+</keybind>
+
+<!-- Super+Shift+S: Quick snapshot -->
+<keybind key="W-S-s">
+  <action name="Execute">
+    <command>bash -c 'artic-snapshot create "quick-$(date +%H%M%S)" && notify-send "articOs" "Snapshot created" --icon=system-software-update'</command>
+  </action>
+</keybind>
+
+<!-- Super+Shift+B: Open artic-box manager in terminal -->
+<keybind key="W-S-b">
+  <action name="Execute">
+    <command>alacritty -e artic-box list</command>
+  </action>
+</keybind>
+
+<!-- Super+Shift+H: Security audit -->
+<keybind key="W-S-h">
+  <action name="Execute">
+    <command>alacritty -e artic-secure audit</command>
+  </action>
+</keybind>

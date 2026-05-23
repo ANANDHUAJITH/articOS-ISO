@@ -1,0 +1,415 @@
+## articOs packages.x86_64
+## Kernel: linux-zen (latency-optimised, better for desktop/gaming/realtime)
+## Base is kept MINIMAL — user selects more via artic-profile on first boot
+
+## ── Core Arch Base ──────────────────────────────────────────────────────────
+alsa-utils
+amd-ucode
+arch-install-scripts
+archinstall
+b43-fwcutter
+base
+bcachefs-tools
+bind
+bolt
+broadcom-wl
+btrfs-progs
+clonezilla
+cloud-init
+cryptsetup
+darkhttpd
+ddrescue
+dhcpcd
+diffutils
+dmidecode
+dmraid
+dnsmasq
+dosfstools
+e2fsprogs
+edk2-shell
+efibootmgr
+ethtool
+exfatprogs
+f2fs-tools
+fatresize
+foot-terminfo
+fsarchiver
+gpart
+gpm
+gptfdisk
+hdparm
+hyperv
+intel-ucode
+irssi
+iw
+iwd
+jfsutils
+ldns
+less
+lftp
+libfido2
+libusb-compat
+
+## ── Kernel: linux-zen (replaces linux) ──────────────────────────────────────
+linux-zen
+linux-zen-headers
+linux-firmware
+linux-firmware-marvell
+linux-atm
+mkinitcpio
+mkinitcpio-archiso
+mkinitcpio-nfs-utils
+
+## ── Boot ────────────────────────────────────────────────────────────────────
+memtest86+
+memtest86+-efi
+mmc-utils
+modemmanager
+mtools
+nbd
+ndisc6
+nfs-utils
+nilfs-utils
+nmap
+ntfs-3g
+nvme-cli
+open-iscsi
+open-vm-tools
+openconnect
+openpgp-card-tools
+openssh
+openvpn
+partclone
+parted
+partimage
+pcsclite
+ppp
+pptpclient
+pv
+refind
+reflector
+rsync
+rxvt-unicode-terminfo
+screen
+sdparm
+sequoia-sq
+sg3_utils
+smartmontools
+sof-firmware
+squashfs-tools
+sudo
+syslinux
+systemd-resolvconf
+tcpdump
+terminus-font
+testdisk
+tmux
+tpm2-tools
+tpm2-tss
+udftools
+usb_modeswitch
+usbmuxd
+usbutils
+vim
+vpnc
+wireless-regdb
+wireless_tools
+wpa_supplicant
+wvdial
+xdg-utils
+xfsprogs
+xl2tpd
+zsh
+
+## ── Bootloader ──────────────────────────────────────────────────────────────
+os-prober
+lsb-release
+grub
+plymouth
+
+## ── Security Stack ──────────────────────────────────────────────────────────
+apparmor
+audit
+firejail
+firewalld
+ufw
+gufw
+fail2ban
+lynis
+#chkrootkit  ## AUR/dropped — install post-boot
+rkhunter
+
+## ── Snapshots & Recovery ────────────────────────────────────────────────────
+timeshift
+snapper
+snap-pac
+grub-btrfs
+
+## ── Containerisation (artic-box) ────────────────────────────────────────────
+podman
+distrobox
+flatpak
+flatpak-builder
+toolbox
+fuse-overlayfs
+slirp4netns
+
+## ── Xorg Server ─────────────────────────────────────────────────────────────
+xorg
+xorg-xinput
+xf86-input-libinput
+
+## ── GPU Drivers ─────────────────────────────────────────────────────────────
+xf86-video-fbdev
+xf86-video-vesa
+xf86-video-intel
+xf86-video-amdgpu
+xf86-video-ati
+mesa
+mesa-utils
+xf86-video-nouveau
+#nvidia-open
+#nvidia-utils
+#nvidia-settings
+
+## ── Hypervisors ─────────────────────────────────────────────────────────────
+virtualbox-guest-utils
+qemu-guest-agent
+xf86-input-vmmouse
+
+## ── Networking ──────────────────────────────────────────────────────────────
+networkmanager
+networkmanager-openconnect
+networkmanager-openvpn
+networkmanager-pptp
+networkmanager-strongswan
+networkmanager-vpnc
+network-manager-sstp
+nm-connection-editor
+network-manager-applet
+nss-mdns
+wireguard-tools
+
+## ── Bluetooth ───────────────────────────────────────────────────────────────
+bluez
+bluez-utils
+blueman
+
+## ── Audio ────────────────────────────────────────────────────────────────────
+pipewire
+wireplumber
+pipewire-alsa
+pipewire-pulse
+pipewire-jack
+pulsemixer
+pavucontrol
+gst-plugin-pipewire
+
+## ── Video Codecs ────────────────────────────────────────────────────────────
+libde265
+libdv
+libmpeg2
+libtheora
+libvpx
+x264
+x265
+xvidcore
+gstreamer
+ffmpeg
+gst-libav
+gst-plugins-good
+gst-plugins-ugly
+gst-plugins-bad
+
+## ── Printing ────────────────────────────────────────────────────────────────
+cups
+cups-pdf
+cups-filters
+ghostscript
+gsfonts
+foomatic-db-engine
+foomatic-db
+gutenprint
+
+## ── Installer ───────────────────────────────────────────────────────────────
+boost
+#calamares  ## AUR/dropped — install post-boot
+
+## ── Qt Style ────────────────────────────────────────────────────────────────
+qt6ct
+qt5ct
+kvantum
+kvantum-qt5
+
+## ── Display Manager ─────────────────────────────────────────────────────────
+sddm
+
+## ── Terminal ────────────────────────────────────────────────────────────────
+alacritty
+kitty
+xfce4-terminal
+foot
+
+## ── Core Apps ────────────────────────────────────────────────────────────────
+firefox
+geany
+geany-plugins
+thunar
+thunar-archive-plugin
+thunar-media-tags-plugin
+thunar-volman
+viewnior
+atril
+
+## ── Media ───────────────────────────────────────────────────────────────────
+mpc
+mpd
+ncmpcpp
+mplayer
+
+## ── TUI Profile Selector deps ────────────────────────────────────────────────
+dialog
+python
+python-pip
+git
+curl
+wget
+jq
+fzf
+
+## ── Window Managers ──────────────────────────────────────────────────────────
+openbox
+obconf-qt
+lxappearance
+bspwm
+sxhkd
+
+## ── Themes & Cursors (standard replacements) ─────────────────────────────────
+materia-gtk-theme
+papirus-icon-theme
+xcursor-themes
+#gtk-engine-murrine  ## dropped from repos
+
+## ── Utilities ───────────────────────────────────────────────────────────────
+acpi
+arandr
+dbus-broker-units
+dunst
+galculator
+gparted
+gnome-keyring
+inetutils
+inotify-tools
+iptables
+brightnessctl
+meld
+fastfetch
+feh
+pastel
+picom
+plank
+polkit
+polybar
+python-pywal
+rofi
+maim
+#simplescreenrecorder  ## AUR/dropped — install post-boot
+slop
+udisks2
+wmctrl
+wmname
+xclip
+xcolor
+xdotool
+xfce4-power-manager
+xfce4-settings
+xmlstarlet
+xsettingsd
+yad
+xdg-user-dirs
+xdg-user-dirs-gtk
+trash-cli
+
+## ── Fonts ────────────────────────────────────────────────────────────────────
+noto-fonts
+noto-fonts-emoji
+noto-fonts-cjk
+ttf-nerd-fonts-symbols
+ttf-jetbrains-mono
+
+## ── Multimedia ───────────────────────────────────────────────────────────────
+ffmpegthumbnailer
+tumbler
+
+## ── Images ───────────────────────────────────────────────────────────────────
+jasper
+libwebp
+libavif
+libheif
+
+## ── File System ──────────────────────────────────────────────────────────────
+gvfs
+gvfs-mtp
+gvfs-afc
+gvfs-gphoto2
+gvfs-smb
+highlight
+ueberzug
+
+## ── Archives ─────────────────────────────────────────────────────────────────
+bzip2
+gzip
+lrzip
+lz4
+lzip
+lzop
+xz
+zstd
+p7zip
+zip
+unzip
+unrar
+unarchiver
+xarchiver
+
+## ── Build Tools ──────────────────────────────────────────────────────────────
+bison
+fakeroot
+flex
+make
+automake
+autoconf
+pkgconf
+patch
+gcc
+base-devel
+
+## ── CLI Tools ────────────────────────────────────────────────────────────────
+htop
+btop
+nethogs
+ncdu
+powertop
+ranger
+neovim
+ripgrep
+bat
+eza
+zoxide
+starship
+
+## ── AUR Packages ─────────────────────────────────────────────────────────────
+#betterlockscreen  ## AUR/dropped — install post-boot
+#downgrade  ## AUR/dropped — install post-boot
+#gtk-nocsd-git  ## AUR/dropped — install post-boot
+#i3lock-color  ## AUR/dropped — install post-boot
+#ksuperkey  ## AUR/dropped — install post-boot
+#mkinitcpio-firmware  ## AUR/dropped — install post-boot
+#networkmanager-dmenu-git  ## AUR/dropped — install post-boot
+#obmenu-generator  ## AUR/dropped — install post-boot
+#perl-linux-desktopfiles  ## AUR/dropped — install post-boot
+#xfce-polkit  ## AUR/dropped — install post-boot
+#yay  ## AUR/dropped — install post-boot
+#paru  ## AUR/dropped — install post-boot
+
+## EOF ─────────────────────────────────────────────────────────────────────────
